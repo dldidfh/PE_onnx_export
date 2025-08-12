@@ -123,22 +123,27 @@ class SelfAttention(nn.Module):
     def forward(self, x, attn_mask=None):
         # original_sdp = F.scaled_dot_product_attention
         F.scaled_dot_product_attention = manual_scaled_dot_product_attention
-        b, seq, _ = x.size()
         proj = F.linear(x, self.in_proj_weight, self.in_proj_bias)
 
         # reshape to 3, E and not E, 3 is deliberate for better memory coalescing
         # and keeping same order as chunk()
         proj = (
-            proj.view(b, seq, 3, self.embed_dim)
+            proj.view(x.size(0), x.size(1), 3, self.embed_dim)
             .permute(2, 0, 1, 3)
             .contiguous()
         )
-        q, k, v = proj[0], proj[1], proj[2]
+        q, k, v = proj.unbind(0)
 
         # Use "q_" so that we don't accidentally quit in pdb :)
-        q = q.view(b, seq, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        k = k.view(b, seq, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        v = v.view(b, seq, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        q = q.view(q.size(0), q.size(1), self.num_heads, self.head_dim).permute(
+            0, 2, 1, 3
+        )
+        k = k.view(k.size(0), k.size(1), self.num_heads, self.head_dim).permute(
+            0, 2, 1, 3
+        )
+        v = v.view(v.size(0), v.size(1), self.num_heads, self.head_dim).permute(
+            0, 2, 1, 3
+        )
 
         if self.rope:
             q, k = self.rope(q, k)
@@ -149,7 +154,7 @@ class SelfAttention(nn.Module):
         attn = (
             attn.permute(0, 2, 1, 3)
             .contiguous()
-            .view(b, seq, self.embed_dim)
+            .view(attn.size(0), attn.size(2), self.embed_dim)
         )
 
         return F.linear(attn, self.out_proj.weight, self.out_proj.bias)
